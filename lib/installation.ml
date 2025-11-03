@@ -1,31 +1,37 @@
-let cat_fromroot _ = failwith ""
-let lwt_request_bytes _ = failwith ""
+open! Import
 
-let[@warning "-32"] unzip_src =
-  {|from zipfile import ZipFile
-from sys import argv
-import os
-dir = argv[1]
-path = os.path.join(argv[1], argv[2])
-with ZipFile(path, "r") as zip_ref:
-  zip_ref.extract("solc.exe", path=dir)
-os.remove(path)
-os.rename(os.path.join(dir, "solc.exe"), path)
-|}
+let cat l = List.reduce_exn ~f:Filename.concat l
+let root_name = ".osolc-select"
+let cat_fromroot l = cat (home :: root_name :: l)
+let json_url = sprintf {|https://binaries.soliditylang.org/%s/list.json|} platform_name
+
+(** [unzip dirpath base_filename]*)
+let unzip dirpath base_filename =
+  let zip_filename = cat [ dirpath; base_filename ] in
+  let temp_filename = cat [ dirpath; "solc.exe" ] in
+  let ic = Zip.open_in zip_filename in
+  Zip.copy_entry_to_file ic (Zip.find_entry ic "solc.exe") temp_filename;
+  Zip.close_in ic;
+  Lwt_unix.rename temp_filename zip_filename
 ;;
-
-let lwt_unzip _dirpath _version =
-  failwith ""
-;;
-
-let json_url = {|https://binaries.soliditylang.org/%{Os.get_platform_name ()}/list.json|}
 
 let is_solc_installed (v : Ver.t) : bool =
   let vstring = Ver.to_string v in
   let expected_filepath = cat_fromroot [ ".solc"; vstring ] in
-  if Sys.file_exists expected_filepath && Sys.is_regular_file expected_filepath then true
-    (* todo: check commands exists well *)
+  if Sys.file_exists expected_filepath && Sys.is_regular_file expected_filepath
+  then true (* todo: check commands exists well *)
   else false
+;;
+
+let http_get url =
+  let open Lwt.Syntax in
+  let* resp, body = Cohttp_lwt_unix.Client.get (Uri.of_string url) in
+  let code = resp |> Cohttp.Response.status |> Cohttp.Code.code_of_status in
+  if Cohttp.Code.is_success code
+  then
+    let* b = Cohttp_lwt.Body.to_string body in
+    Lwt.return (Ok b)
+  else Lwt.return (Error (Cohttp.Code.reason_phrase_of_code code))
 ;;
 
 let solc_download (v : Ver.t) : unit Lwt.t =
@@ -34,66 +40,77 @@ let solc_download (v : Ver.t) : unit Lwt.t =
   let member mem json : Yojson.Basic.t Lwt.t =
     let v = J.member mem json in
     match v with
-    | `Null -> invalid_arg "Solc.Install : json member not found : %s"
+    | `Null -> ksprintf invalid_arg "json member not found : %s" mem
     | _ -> Lwt.return v
   in
-  let* json_content = lwt_request_bytes json_url in
-  let* json =
-    try Lwt.return @@ Yojson.Basic.from_string json_content
-    with Yojson.Json_error _errmsg -> invalid_arg "Solc.Install : json parsing failed"
+  let* got = http_get json_url in
+  let json_content =
+    match got with
+    | Ok s -> s
+    | Error e -> ksprintf invalid_arg "%s" e
+  in
+  let json =
+    try Yojson.Basic.from_string json_content with
+    | Yojson.Json_error _errmsg -> invalid_arg "json parsing failed"
   in
   let* json_releases = member "releases" json in
   let* json_builds =
     match J.member "builds" json with
     | `List l -> Lwt.return l
-    | _ -> invalid_arg "Solc.Install : The server gave us an unexpected json format"
+    | _ -> invalid_arg "The server gave us an unexpected json format"
   in
   let version_string = Ver.to_string v in
   let meta =
-    List.find_opt
-      (fun j ->
-        let version' = J.member "version" j in
-        J.to_string_option version' = Some version_string)
-      json_builds
+    List.find_opt json_builds ~f:(fun j ->
+      let version' = J.member "version" j in
+      J.to_string_option version' = Some version_string)
   in
   let* meta =
     match meta with
     | Some meta -> Lwt.return meta
     | None ->
-      invalid_arg
-        "Solc.Install : maybe unsupported version by binaries.solidity.org. Version: %a"
+      invalid_arg "maybe unsupported version by binaries.solidity.org. Version: %a"
   in
   let* sha256 = member "sha256" meta in
   let* sha256_expect =
     match sha256 with
     | `String s -> Lwt.return s
-    | _ -> failwith "Solc.Install : The server gave us an unexpected json format"
+    | _ -> failwith "The server gave us an unexpected json format"
   in
   let* version_addr =
     match J.member version_string json_releases with
     | `String s -> Lwt.return s
-    | _ ->
-      failwith "Solc.Install : maybe unsupported version by binaries.solidity.org. Version: %a"
+    | _ -> failwith "maybe unsupported version by binaries.solidity.org"
   in
   ignore version_addr;
   let proc_url =
-    {|https://binaries.soliditylang.org/%{Os.get_platform_name ()}/%{version_addr}|}
+    sprintf {|https://binaries.soliditylang.org/%s/%s|} platform_name version_addr
   in
-  let* byte = lwt_request_bytes proc_url in
+  let* got = http_get proc_url in
+  let byte =
+    match got with
+    | Ok s -> s
+    | Error e -> ksprintf failwith "%s" e
+  in
   let hash = Digestif.SHA256.digest_string byte in
   let hash = Format.asprintf "%a" Digestif.SHA256.pp hash in
   let hash = "0x" ^ hash in
   let* () =
-    if hash = sha256_expect then Lwt.return ()
-    else
-      invalid_arg "Solc.Install : Checksums do not match (expected: %s; actual: %s)"
+    if hash = sha256_expect then Lwt.return () else invalid_arg "Checksums do not match"
   in
-  let filename = cat_fromroot [ ".solc"; version_string ] in
+  let filename =
+    cat_fromroot [ "artifacts"; "solc-" ^ version_string; "solc-" ^ version_string ]
+  in
+  let dirname = Filename.dirname filename in
+  makedirs ~exist_ok:true dirname;
   Out_channel.with_open_bin filename (fun oc -> Out_channel.output_string oc byte);
   let* () =
     (* if the file is zipped, unzip *)
-    if String.ends_with ~suffix:".zip" proc_url then
-      lwt_unzip (cat_fromroot [ ".solc" ]) version_string
+    if String.ends_with ~suffix:".zip" proc_url
+    then
+      unzip
+        (cat_fromroot [ "artifacts"; "solc-" ^ version_string ])
+        ("solc-" ^ version_string)
     else Lwt.return ()
   in
   Unix.chmod filename 0o775;
@@ -101,8 +118,8 @@ let solc_download (v : Ver.t) : unit Lwt.t =
 ;;
 
 let install_solc_unit ?(forced = false) (ver : Ver.t) : unit Lwt.t =
-  if (not forced) && is_solc_installed ver then
-    failwith "Solc already installed : %a"
+  if (not forced) && is_solc_installed ver
+  then failwith "Solc already installed : %a"
   else solc_download ver
 ;;
 
@@ -116,11 +133,11 @@ let install_solc ?(forced = false) (cmd : string) : unit =
     let install_solc_unit cmd =
       try install_solc_unit ~forced cmd with
       | Failure s ->
-        let* () = Lwt_io.printf "A thread raised an error: Failure(%s)\n" s in
+        let* () = Lwt_io.printlf "A thread raised an error: Failure(%s)" s in
         let* () = Lwt_io.(flush stdout) in
         Lwt.return ()
       | Invalid_argument s ->
-        let* () = Lwt_io.printf "A thread raised an error: Invalid_argument(%s)\n" s in
+        let* () = Lwt_io.printlf "A thread raised an error: Invalid_argument(%s)" s in
         let* () = Lwt_io.(flush stdout) in
         Lwt.return ()
       | _ -> Lwt.return ()

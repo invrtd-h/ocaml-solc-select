@@ -1,5 +1,9 @@
 (** example: 0.4.22 -> [{ major = 0; minor = 4; patch = 22; }] *)
-type t = { major : int; minor : int; patch : int }
+type t =
+  { major : int
+  ; minor : int
+  ; patch : int
+  }
 [@@deriving compare, equal, show { with_path = false }]
 
 val mk : int -> int -> int -> t
@@ -15,8 +19,3 @@ val pp_human : Format.formatter -> t -> unit
 val to_string : t -> string
 val get_major_minor : t -> int * int
 val versions : t list
-
-(** = 0.4.16 *)
-val least_supported : t
-
-val representatives : t list

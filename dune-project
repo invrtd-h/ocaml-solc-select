@@ -15,7 +15,9 @@
  (depends 
   (ocaml (>= 5.1.1))
   dune
+  camlzip
   (climate (>= 0.8.2)) ; modern CLI parser
+  cohttp-lwt-unix
   digestif
   lwt
   (yojson (>= 2.2.2))))

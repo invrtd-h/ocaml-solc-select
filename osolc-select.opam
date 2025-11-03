@@ -7,7 +7,9 @@ license: "LICENSE"
 depends: [
   "ocaml" {>= "5.1.1"}
   "dune" {>= "3.17"}
+  "camlzip"
   "climate" {>= "0.8.2"}
+  "cohttp-lwt-unix"
   "digestif"
   "lwt"
   "yojson" {>= "2.2.2"}
