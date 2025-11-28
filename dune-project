@@ -16,10 +16,9 @@
   (ocaml (>= 5.1.1))
   dune
   camlzip
-  (climate (>= 0.8.2)) ; modern CLI parser
+  (climate (>= 0.9.0)) ; modern CLI parser
   cohttp-lwt-unix
   digestif
-  lwt
   (yojson (>= 2.2.2))))
 
 ; See the complete stanza docs at https://dune.readthedocs.io/en/stable/dune-files.html#dune-project
