@@ -2,16 +2,22 @@
 
 (name osolc-select)
 
+(authors "invrtd-h")
+
 (maintainers "invrtd-h")
 
 (generate_opam_files true)
 
-(license LICENSE)
+(license MIT)
+
+(homepage https://github.com/invrtd-h/ocaml-solc-select)
+
+(bug_reports https://github.com/invrtd-h/ocaml-solc-select)
 
 (package
  (name osolc-select)
- (synopsis "solc-select, ocaml native")
- (description "solc-select, ocaml native")
+ (synopsis "Solc-select, ocaml native")
+ (description "Solc-select, ocaml native")
  (depends 
   (ocaml (>= 5.1.1))
   dune
