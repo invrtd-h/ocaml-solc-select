@@ -1,4 +1,4 @@
 (executable
- (name main)
+ (name osolc_select)
  (public_name osolc-select)
- (libraries lib))
+ (libraries lib climate))

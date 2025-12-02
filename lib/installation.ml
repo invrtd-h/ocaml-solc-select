@@ -123,26 +123,27 @@ let install_solc_unit ?(forced = false) (ver : Ver.t) : unit Lwt.t =
   else solc_download ver
 ;;
 
+let install_solc_unit ~forced cmd =
+  let open Lwt.Syntax in
+  try install_solc_unit ~forced cmd with
+  | Failure s ->
+    let* () = Lwt_io.printlf "A thread raised an error: Failure(%s)" s in
+    let* () = Lwt_io.(flush stdout) in
+    Lwt.return ()
+  | Invalid_argument s ->
+    let* () = Lwt_io.printlf "A thread raised an error: Invalid_argument(%s)" s in
+    let* () = Lwt_io.(flush stdout) in
+    Lwt.return ()
+  | _ -> Lwt.return ()
+;;
+
 let install_solc ?(forced = false) (cmd : string) : unit =
   match cmd with
   | _ when Option.is_some (Ver.of_string cmd) ->
     Lwt_main.run @@ install_solc_unit ~forced (Ver.of_string_exn cmd)
   | "all" ->
-    let open Lwt.Syntax in
     let vers = Ver.versions in
-    let install_solc_unit cmd =
-      try install_solc_unit ~forced cmd with
-      | Failure s ->
-        let* () = Lwt_io.printlf "A thread raised an error: Failure(%s)" s in
-        let* () = Lwt_io.(flush stdout) in
-        Lwt.return ()
-      | Invalid_argument s ->
-        let* () = Lwt_io.printlf "A thread raised an error: Invalid_argument(%s)" s in
-        let* () = Lwt_io.(flush stdout) in
-        Lwt.return ()
-      | _ -> Lwt.return ()
-    in
-    let results = Lwt_list.map_p install_solc_unit vers in
+    let results = Lwt_list.map_p (install_solc_unit ~forced) vers in
     ignore @@ Lwt_main.run results
   | _ -> failwith "Unsupported cmd"
 ;;
