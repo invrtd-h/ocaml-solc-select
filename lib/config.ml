@@ -1,1 +1,1 @@
-type t = { root : string }
+include Config_intf

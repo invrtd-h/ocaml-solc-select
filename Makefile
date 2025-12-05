@@ -6,7 +6,7 @@ default: install
 
 build:
 	dune fmt || true
-	time dune build
+	\time dune build
 	echo "make: *** [build] Success 0"
 
 install: build

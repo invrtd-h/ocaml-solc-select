@@ -34,5 +34,6 @@ setup.log
 
 # Local OPAM switch
 _opam/
+_opam
 
 .DS_Store

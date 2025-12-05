@@ -1,8 +1,15 @@
+open Config
 open! Import
 
 let cat l = List.reduce_exn ~f:Filename.concat l
-let root_name = ".osolc-select"
-let cat_fromroot l = cat (home :: root_name :: l)
+
+let cat_fromroot (module C : Install_config) l =
+  match C.root with
+  | Crytic -> cat (home :: ".solc-select" :: l)
+  | Global -> cat (home :: ".osolc-select" :: l)
+  | Local -> cat (Sys.getenv "OPAM_SWITCH_PREFIX" :: "sbin" :: "osolc-select" :: l)
+;;
+
 let json_url = sprintf {|https://binaries.soliditylang.org/%s/list.json|} platform_name
 
 (** [unzip dirpath base_filename]*)
@@ -15,9 +22,10 @@ let unzip dirpath base_filename =
   Lwt_unix.rename temp_filename zip_filename
 ;;
 
-let is_solc_installed (v : Ver.t) : bool =
+let is_solc_installed (module C : Install_config) (v : Ver.t) : bool =
   let vstring = Ver.to_string v in
-  let expected_filepath = cat_fromroot [ ".solc"; vstring ] in
+  let vstring = "solc-" ^ vstring in
+  let expected_filepath = cat_fromroot (module C) [ "artifacts"; vstring; vstring ] in
   if Sys.file_exists expected_filepath && Sys.is_regular_file expected_filepath
   then true (* todo: check commands exists well *)
   else false
@@ -34,7 +42,7 @@ let http_get url =
   else Lwt.return (Error (Cohttp.Code.reason_phrase_of_code code))
 ;;
 
-let solc_download (v : Ver.t) : unit Lwt.t =
+let solc_download (module C : Install_config) (v : Ver.t) : unit Lwt.t =
   let module J = Yojson.Basic.Util in
   let open Lwt.Syntax in
   let member mem json : Yojson.Basic.t Lwt.t =
@@ -53,6 +61,9 @@ let solc_download (v : Ver.t) : unit Lwt.t =
     try Yojson.Basic.from_string json_content with
     | Yojson.Json_error _errmsg -> invalid_arg "json parsing failed"
   in
+  Out_channel.with_open_bin
+    (cat_fromroot (module C) [ "response.json" ])
+    (fun oc -> Out_channel.output_string oc json_content);
   let* json_releases = member "releases" json in
   let* json_builds =
     match J.member "builds" json with
@@ -99,7 +110,9 @@ let solc_download (v : Ver.t) : unit Lwt.t =
     if hash = sha256_expect then Lwt.return () else invalid_arg "Checksums do not match"
   in
   let filename =
-    cat_fromroot [ "artifacts"; "solc-" ^ version_string; "solc-" ^ version_string ]
+    cat_fromroot
+      (module C)
+      [ "artifacts"; "solc-" ^ version_string; "solc-" ^ version_string ]
   in
   let dirname = Filename.dirname filename in
   makedirs ~exist_ok:true dirname;
@@ -109,7 +122,7 @@ let solc_download (v : Ver.t) : unit Lwt.t =
     if String.ends_with ~suffix:".zip" proc_url
     then
       unzip
-        (cat_fromroot [ "artifacts"; "solc-" ^ version_string ])
+        (cat_fromroot (module C) [ "artifacts"; "solc-" ^ version_string ])
         ("solc-" ^ version_string)
     else Lwt.return ()
   in
@@ -117,15 +130,15 @@ let solc_download (v : Ver.t) : unit Lwt.t =
   Lwt.return ()
 ;;
 
-let install_solc_unit ?(forced = false) (ver : Ver.t) : unit Lwt.t =
-  if (not forced) && is_solc_installed ver
-  then failwith "Solc already installed : %a"
-  else solc_download ver
+let install_solc_unit (module C : Install_config) (ver : Ver.t) : unit Lwt.t =
+  if (not C.forced) && is_solc_installed (module C) ver
+  then failwithf "Solc already installed : %s" (Ver.to_string ver)
+  else solc_download (module C) ver
 ;;
 
-let install_solc_unit ~forced cmd =
+let install_solc_unit (module C : Install_config) cmd =
   let open Lwt.Syntax in
-  try install_solc_unit ~forced cmd with
+  try install_solc_unit (module C : Install_config) cmd with
   | Failure s ->
     let* () = Lwt_io.printlf "A thread raised an error: Failure(%s)" s in
     let* () = Lwt_io.(flush stdout) in
@@ -137,13 +150,12 @@ let install_solc_unit ~forced cmd =
   | _ -> Lwt.return ()
 ;;
 
-let install_solc ?(forced = false) (cmd : string) : unit =
-  match cmd with
-  | _ when Option.is_some (Ver.of_string cmd) ->
-    Lwt_main.run @@ install_solc_unit ~forced (Ver.of_string_exn cmd)
-  | "all" ->
-    let vers = Ver.versions in
-    let results = Lwt_list.map_p (install_solc_unit ~forced) vers in
+let install_solc (module C : Install_config) : unit =
+  match C.command with
+  | [ cmd ] ->
+    Lwt_main.run @@ install_solc_unit (module C : Install_config) (Ver.of_string_exn cmd)
+  | _ ->
+    let vers = List.map C.command ~f:Ver.of_string_exn in
+    let results = Lwt_list.map_p (install_solc_unit (module C : Install_config)) vers in
     ignore @@ Lwt_main.run results
-  | _ -> failwith "Unsupported cmd"
 ;;

@@ -1,9 +1,12 @@
 module Root = struct
   type t =
-    | Global
-    | Local
+    | Crytic (** [~/.solc-select] *)
+    | Global (** [~/.osolc-select] *)
+    | Local (** [$OPAM_SWITCH_PREFIX/sbin/osolc-select] *)
 end
 
-module Config = struct
-  type t = { root : Root.t }
+module type Install_config = sig
+  val root : Root.t
+  val forced : bool
+  val command : string list
 end

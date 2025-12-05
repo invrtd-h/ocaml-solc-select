@@ -1,2 +1,4 @@
-val is_solc_installed : Ver.t -> bool
-val install_solc : ?forced:bool -> string -> unit
+open Config
+
+val is_solc_installed : (module Install_config) -> Ver.t -> bool
+val install_solc : (module Install_config) -> unit

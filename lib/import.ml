@@ -78,3 +78,4 @@ let home =
 
 let sprintf = Printf.sprintf
 let ksprintf = Printf.ksprintf
+let failwithf fmt = ksprintf failwith fmt
